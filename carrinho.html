@@ -52,7 +52,7 @@
             </div>
 
             <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:20px;">
-                <button class="btn_enviar" style="flex:1; min-width:180px; margin-top:0;" onclick="finalizarCompra()">Finalizar Compra</button>
+                <button class="btn_enviar" style="flex:1; min-width:180px; margin-top:0;" onclick="finalizarCompra()" id="btn-finalizar">Finalizar Compra</button>
                 <button class="btn_enviar" style="flex:1; min-width:180px; margin-top:0; background:linear-gradient(135deg,#6b7280,#4b5563);" onclick="limparCarrinho()">Limpar Carrinho</button>
             </div>
 
@@ -71,16 +71,12 @@
         </div>
     </div>
 
-    <!-- ORDEM: bootstrap → pages.js → script do carrinho -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
     <script src="./pages.js"></script>
     <script>
         function lerCarrinho() {
-            try {
-                return JSON.parse(localStorage.getItem("carrinho") || "[]");
-            } catch {
-                return [];
-            }
+            try { return JSON.parse(localStorage.getItem("carrinho") || "[]"); } 
+            catch { return []; }
         }
 
         function salvarCarrinho(carrinho) {
@@ -124,15 +120,12 @@
             `).join("");
 
             const totalItens = carrinho.reduce((s, i) => s + i.quantidade, 0);
-            const temPreco = carrinho.every(i => typeof i.preco === "number");
-            const totalPreco = temPreco ? carrinho.reduce((s, i) => s + i.preco * i.quantidade, 0) : null;
+            const totalPreco = carrinho.reduce((s, i) => s + (Number(i.preco) || 0) * i.quantidade, 0);
 
             if (resumo) {
                 resumo.style.display = "block";
-                const elItens = document.getElementById("total-itens");
-                const elPreco = document.getElementById("total-preco");
-                if (elItens) elItens.textContent = totalItens;
-                if (elPreco) elPreco.textContent = totalPreco !== null ? formatarPreco(totalPreco) : "—";
+                document.getElementById("total-itens").textContent = totalItens;
+                document.getElementById("total-preco").textContent = formatarPreco(totalPreco);
             }
         }
 
@@ -141,9 +134,7 @@
             const item = carrinho.find(i => i.id === id);
             if (!item) return;
             item.quantidade += delta;
-            const novo = item.quantidade <= 0
-                ? carrinho.filter(i => i.id !== id)
-                : carrinho;
+            const novo = item.quantidade <= 0 ? carrinho.filter(i => i.id !== id) : carrinho;
             salvarCarrinho(novo);
             carregarCarrinho();
         }
@@ -156,9 +147,7 @@
         function limparCarrinho() {
             salvarCarrinho([]);
             carregarCarrinho();
-            if (typeof mostrarToast === "function") {
-                mostrarToast("🗑️ Carrinho esvaziado!", "bg-success");
-            }
+            if (typeof mostrarToast === "function") mostrarToast("🗑️ Carrinho esvaziado!", "bg-success");
         }
 
         async function finalizarCompra() {
@@ -175,6 +164,10 @@
                 return;
             }
 
+            const btn = document.getElementById("btn-finalizar");
+            btn.disabled = true;
+            btn.innerText = "Processando...";
+
             try {
                 const resposta = await fetch("http://localhost:3000/compra", {
                     method: "POST",
@@ -185,24 +178,34 @@
                     body: JSON.stringify({ itens: carrinho })
                 });
 
+                const contentType = resposta.headers.get("content-type");
+                if (!contentType || !contentType.includes("application/json")) {
+                    throw new Error("Erro no servidor. A rota /compra existe?");
+                }
+
                 const json = await resposta.json();
 
                 if (!resposta.ok) {
-                    throw new Error(json.erro || "Erro ao processar compra");
+                    if (resposta.status === 401 || resposta.status === 403) {
+                        if (typeof mostrarToast === "function") mostrarToast("❌ Sessão expirada. Faça login novamente.", "bg-danger");
+                        localStorage.removeItem("token");
+                        localStorage.removeItem("nome_cliente");
+                        setTimeout(() => window.location.href = "login.html", 2000);
+                        return;
+                    }
+                    throw new Error(json.erro || json.msg || "Erro ao processar compra");
                 }
 
-                if (typeof mostrarToast === "function") {
-                    mostrarToast("✅ Compra finalizada com sucesso!", "bg-success");
-                }
-                
+                if (typeof mostrarToast === "function") mostrarToast("✅ Compra finalizada com sucesso!", "bg-success");
                 salvarCarrinho([]);
                 carregarCarrinho();
 
             } catch (error) {
                 console.error(error);
-                if (typeof mostrarToast === "function") {
-                    mostrarToast("❌ " + error.message, "bg-danger");
-                }
+                if (typeof mostrarToast === "function") mostrarToast("❌ " + error.message, "bg-danger");
+            } finally {
+                btn.disabled = false;
+                btn.innerText = "Finalizar Compra";
             }
         }
 

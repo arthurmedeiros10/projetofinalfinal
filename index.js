@@ -44,7 +44,7 @@ app.post("/login", async (req,res) => {
         if(!senha_valida) return res.status(401).json({msg: "Credenciais inválidas!"})
 
         const payload = { id: dados_bd.id, email: dados_bd.email } 
-        const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '2m' })
+        const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '1d' }) // Aumentei para 1 dia para não expirar durante os testes
         return res.status(200).json({nome: dados_bd.nome, token: token})
     } catch (error) {
         res.status(500).json({erro: error.message})
@@ -64,7 +64,7 @@ app.get("/cliente/perfil", autenticar, async (req, res)=>{
 })
 
 // ============================================================
-// ROTAS DE PRODUTO (Filtros e Paginação)
+// ROTAS DE PRODUTO
 // ============================================================
 app.get("/produto", async (req, res) => {
     try {
@@ -90,13 +90,9 @@ app.get("/produto", async (req, res) => {
         }
 
         const where = condicoes.length ? " WHERE " + condicoes.join(" AND ") : ""
-
         let orderBy = ""
-        if (ordenacao === "desc" || ordenacao === "maior preco") {
-            orderBy = " ORDER BY preco DESC"
-        } else if (ordenacao === "asc" || ordenacao === "menor preco") {
-            orderBy = " ORDER BY preco ASC"
-        }
+        if (ordenacao === "desc" || ordenacao === "maior preco") orderBy = " ORDER BY preco DESC"
+        else if (ordenacao === "asc" || ordenacao === "menor preco") orderBy = " ORDER BY preco ASC"
 
         const LIMIT = 10
         const paginaAtual = Math.max(1, parseInt(pagina) || 1)
@@ -124,8 +120,7 @@ app.get("/produto", async (req, res) => {
 
 app.get("/produto/:id", async (req, res) => {
     try {
-        const id = req.params.id
-        const resultado = await db.pool.query("SELECT * FROM produto WHERE id = ?", [id])
+        const resultado = await db.pool.query("SELECT * FROM produto WHERE id = ?", [req.params.id])
         res.status(200).json(resultado[0][0])
     } catch (error) {
         res.status(500).json({erro: error.message})
@@ -135,6 +130,8 @@ app.get("/produto/:id", async (req, res) => {
 // ============================================================
 // ROTAS DE COMPRA (AV3)
 // ============================================================
+
+// Cadastrar compra
 app.post("/compra", autenticar, async (req, res) => {
     const cliente_id = req.usuario.id;
     const { itens } = req.body;
@@ -148,19 +145,23 @@ app.post("/compra", autenticar, async (req, res) => {
     try {
         await connection.beginTransaction();
 
+        // Calcula o total
         let valor_total = 0;
         for (const item of itens) {
             valor_total += Number(item.preco) * Number(item.quantidade);
         }
 
+        // Insere a compra
         const sqlCompra = "INSERT INTO compra (cliente_id, valor_total) VALUES (?, ?)";
         const [resultCompra] = await connection.query(sqlCompra, [cliente_id, valor_total]);
         const compra_id = resultCompra.insertId;
 
+        // Insere os itens
         for (const item of itens) {
             const sqlItem = "INSERT INTO item_compra (compra_id, produto_id, quantidade, preco_unitario) VALUES (?, ?, ?, ?)";
             await connection.query(sqlItem, [compra_id, item.id, item.quantidade, item.preco]);
             
+            // Dá baixa no estoque
             await connection.query("UPDATE produto SET estoque = estoque - ? WHERE id = ?", [item.quantidade, item.id]);
         }
 
@@ -179,6 +180,7 @@ app.post("/compra", autenticar, async (req, res) => {
     }
 });
 
+// Consultar compras
 app.get("/compras", autenticar, async (req, res) => {
     try {
         const cliente_id = req.usuario.id;
